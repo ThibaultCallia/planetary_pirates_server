@@ -15,7 +15,8 @@ const io = new Server(myServer, {
 
 app.use(cors());
 app.use(express.static('public'));
-let rooms = new Map();
+const rooms = new Map();
+const playerToRoom = new Map();
 
 io.on('connection', (socket) => {
   console.log('a user connected', socket.id);
@@ -26,9 +27,26 @@ io.on('connection', (socket) => {
     console.log('create-room', roomCode, noOfPlayers);
     if (!rooms.has(roomName)) {
       // Store room data
-      rooms.set(roomCode, { roomName, roomPass, noOfPlayers, players: [] });
+      rooms.set(roomCode, {
+        roomName,
+        roomPass,
+        noOfPlayers,
+        players: [],
+        gameState: {},
+      });
       console.log(`Room ${roomName} created with code ${roomCode}`);
+      socket.join(roomCode);
+      //   Add player to room player array
+      const playerData = {
+        id: socket.id,
+        name: 'Player 1', // This can be replaced by the actual player's name
+        roomCode,
+      };
+      const roomData = rooms.get(roomCode);
+      roomData.players.push(playerData);
 
+      playerToRoom.set(socket.id, roomCode);
+      socket.emit('room-created', { roomCode, maxPlayers: noOfPlayers });
       // Send the roomCode back to the client
       callback(roomCode);
     } else {
@@ -36,8 +54,7 @@ io.on('connection', (socket) => {
       console.log('Room name already exists');
       socket.emit('room-error', { message: 'Room name already exists' });
 
-      // Send undefined to the client as the roomCode couldn't be generated
-      callback(undefined);
+      // Send undefined to the client as the roomCode couldn't be generated?
     }
   });
 
@@ -59,6 +76,11 @@ io.on('connection', (socket) => {
       if (roomData.roomPass === roomPass) {
         if (roomData.players.length < roomData.noOfPlayers) {
           socket.join(roomCode);
+          const playerData = {
+            id: socket.id,
+            roomCode,
+          };
+          roomData.players.push(playerData);
           socket.emit('room-joined', { roomCode });
           console.log('Room joined', roomCode);
         } else {
@@ -90,7 +112,29 @@ io.on('connection', (socket) => {
 
   // DISCONNECT
   socket.on('disconnect', () => {
-    console.log('user disconnected');
+    console.log('User disconnected:', socket.id);
+
+    const roomCode = playerToRoom.get(socket.id);
+
+    if (roomCode) {
+      const roomData = rooms.get(roomCode);
+      if (roomData) {
+        // Remove the player from the room's player list
+        roomData.players = roomData.players.filter(
+          (player) => player.id !== socket.id
+        );
+
+        // Remove the room if there are no players left
+        if (roomData.players.length === 0) {
+          rooms.delete(roomCode);
+        } else {
+          // Otherwise, UPDATE THE GAMES STATE?
+        }
+      }
+
+      // Remove the player's socket ID from the playerToRoom Map
+      playerToRoom.delete(socket.id);
+    }
   });
 });
 
