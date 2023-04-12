@@ -47,6 +47,7 @@ io.on('connection', (socket) => {
 
       playerToRoom.set(socket.id, roomCode);
       socket.emit('room-created', { roomCode, maxPlayers: noOfPlayers });
+      io.in(roomCode).emit('player-joined', { playersJoined: 1 });
       // Send the roomCode back to the client
       callback(roomCode);
     } else {
@@ -81,7 +82,10 @@ io.on('connection', (socket) => {
             roomCode,
           };
           roomData.players.push(playerData);
-          socket.emit('room-joined', { roomCode });
+          const playersJoined = roomData.players.length;
+          const maxPlayers = roomData.noOfPlayers;
+          socket.emit('room-joined', { roomCode, playersJoined, maxPlayers });
+          io.in(roomCode).emit('player-joined', { playersJoined });
           console.log('Room joined', roomCode);
         } else {
           socket.emit('room-error', { message: 'Room is full' });
