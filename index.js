@@ -59,12 +59,10 @@ io.on('connection', (socket) => {
       //   Add player to room player array
       const playerData = {
         id: socket.id,
-        name: 'Player 1', // This can be replaced by the actual player's name
         roomCode,
       };
       const roomData = rooms.get(roomCode);
       roomData.players.push(playerData);
-
       playerToRoom.set(socket.id, roomCode);
 
       socket.emit(
@@ -115,20 +113,21 @@ io.on('connection', (socket) => {
 
     socket.join(roomCode);
     const playerData = {
-      id: socket.id,
+      id: socket.id, // This can be replaced by the actual player's name
       roomCode,
     };
     roomData.players.push(playerData);
     const playersJoined = roomData.players.length;
     const maxPlayers = roomData.noOfPlayers;
     const gameState = roomData.gameState;
+    const playerIds = roomData.players.map((player) => player.id);
     socket.emit('room-joined', {
       roomCode,
       playersJoined,
       maxPlayers,
       gameState,
     });
-    io.in(roomCode).emit('player-joined', { playersJoined });
+    io.in(roomCode).emit('player-joined', { playersJoined, playerIds });
     console.log('Room joined', roomCode);
   });
 
