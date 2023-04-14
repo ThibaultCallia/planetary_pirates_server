@@ -20,20 +20,40 @@ const playerToRoom = new Map();
 
 io.on('connection', (socket) => {
   console.log('a user connected', socket.id);
+  // console.log(socket);
 
   // ROOM CREATION
-  socket.on('create-room', ({ roomName, roomPass, noOfPlayers }, callback) => {
-    const roomCode = nanoid(6);
-    console.log('create-room', roomCode, noOfPlayers);
-    if (!rooms.has(roomName)) {
+  socket.on(
+    'create-room',
+    ({ roomName, roomPass, noOfPlayers, initialGameState }, callback) => {
+      const isRoomNameTaken = (newName) => {
+        for (const roomData of rooms.values()) {
+          if (roomData.roomName === newName) {
+            return true;
+          }
+        }
+        return false;
+      };
+
+      if (isRoomNameTaken(roomName)) {
+        // Room code already exists
+        console.log('Room name already exists');
+        socket.emit('room-error', { message: 'Room name already exists' });
+        return;
+        // Send undefined to the client as the roomCode couldn't be generated?
+      }
+
+      const roomCode = nanoid(6);
+      console.log('create-room', roomCode, noOfPlayers);
       // Store room data
       rooms.set(roomCode, {
         roomName,
         roomPass,
         noOfPlayers,
         players: [],
-        gameState: {},
+        gameState: initialGameState,
       });
+
       console.log(`Room ${roomName} created with code ${roomCode}`);
       socket.join(roomCode);
       //   Add player to room player array
@@ -46,21 +66,24 @@ io.on('connection', (socket) => {
       roomData.players.push(playerData);
 
       playerToRoom.set(socket.id, roomCode);
-      socket.emit('room-created', { roomCode, maxPlayers: noOfPlayers });
-      io.in(roomCode).emit('player-joined', { playersJoined: 1 });
+
+      socket.emit(
+        'room-created',
+        { roomCode, maxPlayers: noOfPlayers, gameState: initialGameState },
+        () => {
+          io.in(roomCode).emit('player-joined', { playersJoined: 1 });
+        }
+      );
+      // Can this fail as the room hasn't been created yet?
+      // io.in(roomCode).emit('player-joined', { playersJoined: 1 });
       // Send the roomCode back to the client
       callback(roomCode);
-    } else {
-      // Room code already exists
-      console.log('Room name already exists');
-      socket.emit('room-error', { message: 'Room name already exists' });
-
-      // Send undefined to the client as the roomCode couldn't be generated?
     }
-  });
+  );
 
   // ROOM JOINING
   socket.on('join-room', ({ roomName, roomPass }) => {
+    console.log('join-room', roomName, roomPass);
     let roomCode;
     let roomData;
     console.log(rooms.entries());
@@ -73,33 +96,40 @@ io.on('connection', (socket) => {
       }
     }
     // PLAYERS IN ROOM NOT YET ACCOUNTED FOR
-    if (roomData) {
-      if (roomData.roomPass === roomPass) {
-        if (roomData.players.length < roomData.noOfPlayers) {
-          socket.join(roomCode);
-          const playerData = {
-            id: socket.id,
-            roomCode,
-          };
-          roomData.players.push(playerData);
-          const playersJoined = roomData.players.length;
-          const maxPlayers = roomData.noOfPlayers;
-          socket.emit('room-joined', { roomCode, playersJoined, maxPlayers });
-          io.in(roomCode).emit('player-joined', { playersJoined });
-          console.log('Room joined', roomCode);
-        } else {
-          socket.emit('room-error', { message: 'Room is full' });
-        }
-      } else {
-        console.log('Invalid password or room name');
-        socket.emit('room-error', {
-          message: 'Password and/or name not known',
-        });
-      }
-    } else {
+    if (!roomData) {
       console.log('Room not found');
       socket.emit('room-error', { message: 'Password and/or name not known' });
+      return;
     }
+
+    if (roomData.roomPass !== roomPass) {
+      console.log('Invalid password or room name');
+      socket.emit('room-error', { message: 'Password and/or name not known' });
+      return;
+    }
+
+    if (roomData.players.length >= roomData.noOfPlayers) {
+      socket.emit('room-error', { message: 'Room is full' });
+      return;
+    }
+
+    socket.join(roomCode);
+    const playerData = {
+      id: socket.id,
+      roomCode,
+    };
+    roomData.players.push(playerData);
+    const playersJoined = roomData.players.length;
+    const maxPlayers = roomData.noOfPlayers;
+    const gameState = roomData.gameState;
+    socket.emit('room-joined', {
+      roomCode,
+      playersJoined,
+      maxPlayers,
+      gameState,
+    });
+    io.in(roomCode).emit('player-joined', { playersJoined });
+    console.log('Room joined', roomCode);
   });
 
   //   GAME ACTIONS
