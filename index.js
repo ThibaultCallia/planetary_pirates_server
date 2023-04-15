@@ -132,19 +132,27 @@ io.on('connection', (socket) => {
   });
 
   //   GAME ACTIONS
-  socket.on('game-action', ({ roomCode, action }) => {
-    const room = rooms[roomCode];
-    if (room) {
-      // room.gameState = action;
-      io.to(roomCode).emit('game-action', action);
-    } else {
+  socket.on('game-action', (action) => {
+    const roomCode = playerToRoom.get(socket.id);
+    if (!roomCode) {
+      console.log('player not found');
+      socket.emit('error', { message: 'player not found' });
+      return;
+    }
+    const room = rooms.get(roomCode);
+    if (!room) {
       console.log('Room not found');
       socket.emit('error', { message: 'Room not found' });
+      return;
     }
+    // below can also be socket.to in case  all players -  including this one - should get updates
+    console.log('game-action', action);
+    socket.to(roomCode).emit('game-action', action);
   });
 
   // DISCONNECT
   socket.on('disconnect', () => {
+    socket.to(roomCode).emit('player-left', { playerId: socket.id });
     console.log('User disconnected:', socket.id);
 
     const roomCode = playerToRoom.get(socket.id);
