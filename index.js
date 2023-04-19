@@ -117,6 +117,7 @@ io.on('connection', (socket) => {
       roomCode,
     };
     roomData.players.push(playerData);
+    playerToRoom.set(socket.id, roomCode);
     const playersJoined = roomData.players.length;
     const maxPlayers = roomData.noOfPlayers;
     const gameState = roomData.gameState;
@@ -146,13 +147,13 @@ io.on('connection', (socket) => {
       return;
     }
     // below can also be socket.to in case  all players -  including this one - should get updates
-    console.log('game-action', action);
     socket.to(roomCode).emit('game-action', action);
+    console.log('game-action', action);
   });
 
   // DISCONNECT
   socket.on('disconnect', () => {
-    socket.to(roomCode).emit('player-left', { playerId: socket.id });
+    // socket.to(roomCode).emit('player-left', { playerId: socket.id });
     console.log('User disconnected:', socket.id);
 
     const roomCode = playerToRoom.get(socket.id);
