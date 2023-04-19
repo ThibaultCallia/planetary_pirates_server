@@ -6,9 +6,25 @@ import { nanoid } from 'nanoid';
 
 const app = express();
 const myServer = http.createServer(app);
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:4173',
+  'https://planetarypirates.surge.sh',
+  'http://192.168.0.145:5173',
+  'http://127.0.0.1:5173',
+];
+
 const io = new Server(myServer, {
   cors: {
-    origin: 'http://localhost:5173',
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.indexOf(origin) === -1) {
+        const msg =
+          'The CORS policy for this site does not allow access from the specified origin.';
+        return callback(new Error(msg), false);
+      }
+      return callback(null, true);
+    },
     methods: ['GET', 'POST'],
   },
 });
