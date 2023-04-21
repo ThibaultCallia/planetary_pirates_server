@@ -36,7 +36,6 @@ const playerToRoom = new Map();
 
 io.on('connection', (socket) => {
   console.log('a user connected', socket.id);
-  // console.log(socket);
 
   // ROOM CREATION
   socket.on(
@@ -60,7 +59,7 @@ io.on('connection', (socket) => {
       }
 
       const roomCode = nanoid(6);
-      console.log('create-room', roomCode, noOfPlayers);
+
       // Store room data
       rooms.set(roomCode, {
         roomName,
@@ -70,7 +69,6 @@ io.on('connection', (socket) => {
         gameState: initialGameState,
       });
 
-      console.log(`Room ${roomName} created with code ${roomCode}`);
       socket.join(roomCode);
       //   Add player to room player array
       const playerData = {
@@ -97,10 +95,9 @@ io.on('connection', (socket) => {
 
   // ROOM JOINING
   socket.on('join-room', ({ roomName, roomPass }) => {
-    console.log('join-room', roomName, roomPass);
     let roomCode;
     let roomData;
-    console.log(rooms.entries());
+
     // Find the room code associated with the room name
     for (const [code, data] of rooms.entries()) {
       if (data.roomName === roomName) {
@@ -145,7 +142,6 @@ io.on('connection', (socket) => {
       gameState,
     });
     io.in(roomCode).emit('player-joined', { playersJoined, playerIds });
-    console.log('Room joined', roomCode);
   });
 
   //   GAME ACTIONS
@@ -164,12 +160,25 @@ io.on('connection', (socket) => {
     }
     // below can also be socket.to in case  all players -  including this one - should get updates
     socket.to(roomCode).emit('game-action', action);
-    console.log('game-action', action);
+  });
+
+  socket.on('update-game-state', ({ roomCode, newGameState }) => {
+    const room = rooms.get(roomCode);
+    if (room) {
+      room.gameState = newGameState;
+      rooms.set(roomCode, room);
+      // io.to(roomCode).emit('sync-game-state', { gameState: room.gameState });
+    }
+  });
+
+  socket.on('end-turn', ({ roomCode }) => {
+    const gameState = rooms.get(roomCode).gameState;
+    socket.broadcast.to(roomCode).emit('sync-game-state', { gameState });
+    console.log('end-turn');
   });
 
   // DISCONNECT
   socket.on('disconnect', () => {
-    // socket.to(roomCode).emit('player-left', { playerId: socket.id });
     console.log('User disconnected:', socket.id);
 
     const roomCode = playerToRoom.get(socket.id);
@@ -181,6 +190,8 @@ io.on('connection', (socket) => {
         roomData.players = roomData.players.filter(
           (player) => player.id !== socket.id
         );
+
+        socket.to(roomCode).emit('player-left', { playerId: socket.id });
 
         // Remove the room if there are no players left
         if (roomData.players.length === 0) {
