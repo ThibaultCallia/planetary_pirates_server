@@ -191,7 +191,9 @@ io.on('connection', (socket) => {
           (player) => player.id !== socket.id
         );
 
-        socket.to(roomCode).emit('player-left', { playerId: socket.id });
+        socket
+          .to(roomCode)
+          .emit('player-disconnected', { playerId: socket.id });
 
         // Remove the room if there are no players left
         if (roomData.players.length === 0) {
