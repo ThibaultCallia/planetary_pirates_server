@@ -53,7 +53,8 @@ io.on('connection', (socket) => {
       if (isRoomNameTaken(roomName)) {
         // Room code already exists
         console.log('Room name already exists');
-        socket.emit('room-error', { message: 'Room name already exists' });
+        callback({ success: false, message: 'Room name already exists' });
+        // socket.emit('room-error', { message: 'Room name already exists' });
         return;
         // Send undefined to the client as the roomCode couldn't be generated?
       }
@@ -101,7 +102,7 @@ io.on('connection', (socket) => {
       // Can this fail as the room hasn't been created yet?
       // io.in(roomCode).emit('player-joined', { playersJoined: 1 });
       // Send the roomCode back to the client
-      callback(roomCode);
+      callback({ success: true, roomCode });
     }
   );
 
