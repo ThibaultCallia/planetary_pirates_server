@@ -73,7 +73,9 @@ io.on('connection', (socket) => {
       //   Add player to room player array
       const playerData = {
         id: socket.id,
+        socketId: socket.id,
         roomCode,
+        disconnected: false,
       };
       const roomData = rooms.get(roomCode);
       roomData.players.push(playerData);
@@ -81,9 +83,17 @@ io.on('connection', (socket) => {
 
       socket.emit(
         'room-created',
-        { roomCode, maxPlayers: noOfPlayers, gameState: initialGameState },
+        {
+          roomCode,
+          maxPlayers: noOfPlayers,
+          gameState: initialGameState,
+          playerId: socket.id,
+        },
         () => {
-          io.in(roomCode).emit('player-joined', { playersJoined: 1 });
+          io.in(roomCode).emit('player-joined', {
+            playersJoined: 1,
+            playerIds: [socket.id],
+          });
         }
       );
       // Can this fail as the room hasn't been created yet?
@@ -127,7 +137,9 @@ io.on('connection', (socket) => {
     socket.join(roomCode);
     const playerData = {
       id: socket.id, // This can be replaced by the actual player's name
+      socketId: socket.id,
       roomCode,
+      disconnected: false,
     };
     roomData.players.push(playerData);
     playerToRoom.set(socket.id, roomCode);
@@ -145,8 +157,9 @@ io.on('connection', (socket) => {
   });
 
   //   GAME ACTIONS
-  socket.on('game-action', (action) => {
-    const roomCode = playerToRoom.get(socket.id);
+  // SOCKET ID WILL CHANGE UPON REFRESH
+  socket.on('game-action', (action, playerId) => {
+    const roomCode = playerToRoom.get(playerId);
     if (!roomCode) {
       console.log('player not found');
       socket.emit('error', { message: 'player not found' });
@@ -162,19 +175,43 @@ io.on('connection', (socket) => {
     socket.to(roomCode).emit('game-action', action);
   });
 
+  // UPDATING GAME STATE
   socket.on('update-game-state', ({ roomCode, newGameState }) => {
     const room = rooms.get(roomCode);
     if (room) {
       room.gameState = newGameState;
       rooms.set(roomCode, room);
-      // io.to(roomCode).emit('sync-game-state', { gameState: room.gameState });
     }
   });
 
+  // ENDING TURN
   socket.on('end-turn', ({ roomCode }) => {
     const gameState = rooms.get(roomCode).gameState;
     socket.broadcast.to(roomCode).emit('sync-game-state', { gameState });
-    console.log('end-turn');
+  });
+
+  // REJOINING
+  // Backend
+  socket.on('rejoin-room', ({ playerId, roomCode }, callback) => {
+    const roomData = rooms.get(roomCode);
+    if (roomData) {
+      // ONLY DISCONNECTED PLAYERS CAN REJOIN?
+      const player = roomData.players.find((player) => player.id === playerId);
+      if (player) {
+        player.disconnected = false;
+        player.socketId = socket.id;
+        socket.join(roomCode);
+
+        // Notify other players that the player has reconnected
+        socket.to(roomCode).emit('player-reconnected', { playerId });
+
+        callback({ success: true, roomData });
+      } else {
+        callback({ success: false, message: 'Player not found' });
+      }
+    } else {
+      callback({ success: false, message: 'Room not found' });
+    }
   });
 
   // DISCONNECT
@@ -187,17 +224,24 @@ io.on('connection', (socket) => {
       const roomData = rooms.get(roomCode);
       if (roomData) {
         // Remove the player from the room's player list
-        roomData.players = roomData.players.filter(
-          (player) => player.id !== socket.id
+        const disconnectedPlayerIndex = roomData.players.findIndex(
+          (player) => player.socketId === socket.id
         );
+
+        if (disconnectedPlayerIndex !== -1) {
+          roomData.players[disconnectedPlayerIndex].disconnected = true;
+        }
 
         socket
           .to(roomCode)
           .emit('player-disconnected', { playerId: socket.id });
 
         // Remove the room if there are no players left
-        if (roomData.players.length === 0) {
+        if (
+          roomData.players.filter((player) => !player.disconnected).length === 0
+        ) {
           rooms.delete(roomCode);
+          console.log('Room deleted');
         } else {
           // Otherwise, UPDATE THE GAMES STATE?
         }
