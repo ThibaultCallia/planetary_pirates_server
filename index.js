@@ -78,8 +78,10 @@ io.on('connection', (socket) => {
         disconnected: false,
       };
       const roomData = rooms.get(roomCode);
+
       roomData.players.push(playerData);
-      playerToRoom.set(socket.id, roomCode);
+      const playerId = socket.id;
+      playerToRoom.set(playerId, { roomCode, socketId: socket.id });
 
       socket.emit(
         'room-created',
@@ -142,7 +144,8 @@ io.on('connection', (socket) => {
       disconnected: false,
     };
     roomData.players.push(playerData);
-    playerToRoom.set(socket.id, roomCode);
+    const playerId = socket.id;
+    playerToRoom.set(playerId, { roomCode, socketId: socket.id });
     const playersJoined = roomData.players.length;
     const maxPlayers = roomData.noOfPlayers;
     const gameState = roomData.gameState;
@@ -159,7 +162,8 @@ io.on('connection', (socket) => {
   //   GAME ACTIONS
   // SOCKET ID WILL CHANGE UPON REFRESH
   socket.on('game-action', (action, playerId) => {
-    const roomCode = playerToRoom.get(playerId);
+    const roomCode = playerToRoom.get(playerId).roomCode;
+
     if (!roomCode) {
       console.log('player not found');
       socket.emit('error', { message: 'player not found' });
@@ -200,12 +204,13 @@ io.on('connection', (socket) => {
       if (player) {
         player.disconnected = false;
         player.socketId = socket.id;
+        playerToRoom.set(playerId, { roomCode, socketId: socket.id });
         socket.join(roomCode);
 
         // Notify other players that the player has reconnected
         socket.to(roomCode).emit('player-reconnected', { playerId });
 
-        callback({ success: true, roomData });
+        callback({ success: true, roomData, roomCode });
       } else {
         callback({ success: false, message: 'Player not found' });
       }
@@ -218,7 +223,15 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
 
-    const roomCode = playerToRoom.get(socket.id);
+    let roomCode = null;
+    for (const [playerId, data] of playerToRoom.entries()) {
+      if (data.socketId === socket.id) {
+        roomCode = data.roomCode;
+        break;
+      }
+    }
+
+    // AFTER REFRESH, SOCKET ID NO LONGER VALID IN THIS
 
     if (roomCode) {
       const roomData = rooms.get(roomCode);
@@ -248,7 +261,7 @@ io.on('connection', (socket) => {
       }
 
       // Remove the player's socket ID from the playerToRoom Map
-      playerToRoom.delete(socket.id);
+      // playerToRoom.delete(socket.id);
     }
   });
 });
