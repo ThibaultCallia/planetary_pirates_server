@@ -107,7 +107,7 @@ io.on('connection', (socket) => {
   );
 
   // ROOM JOINING
-  socket.on('join-room', ({ roomName, roomPass }) => {
+  socket.on('join-room', ({ roomName, roomPass }, callback) => {
     let roomCode;
     let roomData;
 
@@ -120,20 +120,16 @@ io.on('connection', (socket) => {
       }
     }
     // PLAYERS IN ROOM NOT YET ACCOUNTED FOR
-    if (!roomData) {
-      console.log('Room not found');
-      socket.emit('room-error', { message: 'Password and/or name not known' });
-      return;
-    }
 
-    if (roomData.roomPass !== roomPass) {
+    if (!roomData || roomData.roomPass !== roomPass) {
       console.log('Invalid password or room name');
-      socket.emit('room-error', { message: 'Password and/or name not known' });
+
+      callback({ success: false, message: 'Password or name incorrect' });
       return;
     }
 
     if (roomData.players.length >= roomData.noOfPlayers) {
-      socket.emit('room-error', { message: 'Room is full' });
+      callback({ success: false, message: 'Room is full' });
       return;
     }
 
@@ -245,6 +241,11 @@ io.on('connection', (socket) => {
         if (disconnectedPlayerIndex !== -1) {
           roomData.players[disconnectedPlayerIndex].disconnected = true;
         }
+        console.log(
+          `player info: ${JSON.stringify(
+            roomData.players[disconnectedPlayerIndex]
+          )}`
+        );
 
         socket
           .to(roomCode)
@@ -256,13 +257,18 @@ io.on('connection', (socket) => {
         ) {
           rooms.delete(roomCode);
           console.log('Room deleted');
-        } else {
-          // Otherwise, UPDATE THE GAMES STATE?
+          for (const [playerId, data] of playerToRoom.entries()) {
+            if (data.roomCode === roomCode) {
+              playerToRoom.delete(playerId);
+            }
+          }
+          console.log('playerToRoom deleted');
         }
       }
 
       // Remove the player's socket ID from the playerToRoom Map
-      // playerToRoom.delete(socket.id);
+    } else {
+      console.log('Room not found');
     }
   });
 });
