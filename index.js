@@ -53,7 +53,8 @@ io.on('connection', (socket) => {
       if (isRoomNameTaken(roomName)) {
         // Room code already exists
         console.log('Room name already exists');
-        socket.emit('room-error', { message: 'Room name already exists' });
+        callback({ success: false, message: 'Room name already exists' });
+        // socket.emit('room-error', { message: 'Room name already exists' });
         return;
         // Send undefined to the client as the roomCode couldn't be generated?
       }
@@ -73,28 +74,40 @@ io.on('connection', (socket) => {
       //   Add player to room player array
       const playerData = {
         id: socket.id,
+        socketId: socket.id,
         roomCode,
+        disconnected: false,
       };
       const roomData = rooms.get(roomCode);
+
       roomData.players.push(playerData);
-      playerToRoom.set(socket.id, roomCode);
+      const playerId = socket.id;
+      playerToRoom.set(playerId, { roomCode, socketId: socket.id });
 
       socket.emit(
         'room-created',
-        { roomCode, maxPlayers: noOfPlayers, gameState: initialGameState },
+        {
+          roomCode,
+          maxPlayers: noOfPlayers,
+          gameState: initialGameState,
+          playerId: socket.id,
+        },
         () => {
-          io.in(roomCode).emit('player-joined', { playersJoined: 1 });
+          io.in(roomCode).emit('player-joined', {
+            playersJoined: 1,
+            playerIds: [socket.id],
+          });
         }
       );
       // Can this fail as the room hasn't been created yet?
       // io.in(roomCode).emit('player-joined', { playersJoined: 1 });
       // Send the roomCode back to the client
-      callback(roomCode);
+      callback({ success: true, roomCode });
     }
   );
 
   // ROOM JOINING
-  socket.on('join-room', ({ roomName, roomPass }) => {
+  socket.on('join-room', ({ roomName, roomPass }, callback) => {
     let roomCode;
     let roomData;
 
@@ -107,30 +120,29 @@ io.on('connection', (socket) => {
       }
     }
     // PLAYERS IN ROOM NOT YET ACCOUNTED FOR
-    if (!roomData) {
-      console.log('Room not found');
-      socket.emit('room-error', { message: 'Password and/or name not known' });
-      return;
-    }
 
-    if (roomData.roomPass !== roomPass) {
+    if (!roomData || roomData.roomPass !== roomPass) {
       console.log('Invalid password or room name');
-      socket.emit('room-error', { message: 'Password and/or name not known' });
+
+      callback({ success: false, message: 'Password or name incorrect' });
       return;
     }
 
     if (roomData.players.length >= roomData.noOfPlayers) {
-      socket.emit('room-error', { message: 'Room is full' });
+      callback({ success: false, message: 'Room is full' });
       return;
     }
 
     socket.join(roomCode);
     const playerData = {
       id: socket.id, // This can be replaced by the actual player's name
+      socketId: socket.id,
       roomCode,
+      disconnected: false,
     };
     roomData.players.push(playerData);
-    playerToRoom.set(socket.id, roomCode);
+    const playerId = socket.id;
+    playerToRoom.set(playerId, { roomCode, socketId: socket.id });
     const playersJoined = roomData.players.length;
     const maxPlayers = roomData.noOfPlayers;
     const gameState = roomData.gameState;
@@ -145,8 +157,10 @@ io.on('connection', (socket) => {
   });
 
   //   GAME ACTIONS
-  socket.on('game-action', (action) => {
-    const roomCode = playerToRoom.get(socket.id);
+  // SOCKET ID WILL CHANGE UPON REFRESH
+  socket.on('game-action', (action, playerId) => {
+    const roomCode = playerToRoom.get(playerId).roomCode;
+
     if (!roomCode) {
       console.log('player not found');
       socket.emit('error', { message: 'player not found' });
@@ -162,33 +176,75 @@ io.on('connection', (socket) => {
     socket.to(roomCode).emit('game-action', action);
   });
 
+  // UPDATING GAME STATE
   socket.on('update-game-state', ({ roomCode, newGameState }) => {
     const room = rooms.get(roomCode);
     if (room) {
       room.gameState = newGameState;
       rooms.set(roomCode, room);
-      // io.to(roomCode).emit('sync-game-state', { gameState: room.gameState });
     }
   });
 
+  // ENDING TURN
   socket.on('end-turn', ({ roomCode }) => {
     const gameState = rooms.get(roomCode).gameState;
     socket.broadcast.to(roomCode).emit('sync-game-state', { gameState });
-    console.log('end-turn');
+  });
+
+  // REJOINING
+  // Backend
+  socket.on('rejoin-room', ({ playerId, roomCode }, callback) => {
+    const roomData = rooms.get(roomCode);
+    if (roomData) {
+      // ONLY DISCONNECTED PLAYERS CAN REJOIN?
+      const player = roomData.players.find((player) => player.id === playerId);
+      if (player) {
+        player.disconnected = false;
+        player.socketId = socket.id;
+        playerToRoom.set(playerId, { roomCode, socketId: socket.id });
+        socket.join(roomCode);
+
+        // Notify other players that the player has reconnected
+        socket.to(roomCode).emit('player-reconnected', { playerId });
+
+        callback({ success: true, roomData, roomCode });
+      } else {
+        callback({ success: false, message: 'Player not found' });
+      }
+    } else {
+      callback({ success: false, message: 'Room not found' });
+    }
   });
 
   // DISCONNECT
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
 
-    const roomCode = playerToRoom.get(socket.id);
+    let roomCode = null;
+    for (const [playerId, data] of playerToRoom.entries()) {
+      if (data.socketId === socket.id) {
+        roomCode = data.roomCode;
+        break;
+      }
+    }
+
+    // AFTER REFRESH, SOCKET ID NO LONGER VALID IN THIS
 
     if (roomCode) {
       const roomData = rooms.get(roomCode);
       if (roomData) {
         // Remove the player from the room's player list
-        roomData.players = roomData.players.filter(
-          (player) => player.id !== socket.id
+        const disconnectedPlayerIndex = roomData.players.findIndex(
+          (player) => player.socketId === socket.id
+        );
+
+        if (disconnectedPlayerIndex !== -1) {
+          roomData.players[disconnectedPlayerIndex].disconnected = true;
+        }
+        console.log(
+          `player info: ${JSON.stringify(
+            roomData.players[disconnectedPlayerIndex]
+          )}`
         );
 
         socket
@@ -196,15 +252,23 @@ io.on('connection', (socket) => {
           .emit('player-disconnected', { playerId: socket.id });
 
         // Remove the room if there are no players left
-        if (roomData.players.length === 0) {
+        if (
+          roomData.players.filter((player) => !player.disconnected).length === 0
+        ) {
           rooms.delete(roomCode);
-        } else {
-          // Otherwise, UPDATE THE GAMES STATE?
+          console.log('Room deleted');
+          for (const [playerId, data] of playerToRoom.entries()) {
+            if (data.roomCode === roomCode) {
+              playerToRoom.delete(playerId);
+            }
+          }
+          console.log('playerToRoom deleted');
         }
       }
 
       // Remove the player's socket ID from the playerToRoom Map
-      playerToRoom.delete(socket.id);
+    } else {
+      console.log('Room not found');
     }
   });
 });
